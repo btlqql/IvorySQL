@@ -38,6 +38,7 @@ jobs:
 
           psql -X -p 55432 -d repro1696 -v ON_ERROR_STOP=1 <<'SQL'
           SELECT version();
+          SET ivorysql.compatible_mode = oracle;
           SHOW ivorysql.compatible_mode;
           SHOW nls_date_format;
 
