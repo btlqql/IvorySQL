@@ -1,7 +1,9 @@
 name: Autonomous transaction reproduction
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - codex/repro-autonomous-1695
 
 jobs:
   reproduce:
