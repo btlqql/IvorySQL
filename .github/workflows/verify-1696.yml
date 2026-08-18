@@ -1,0 +1,92 @@
+name: verify-1696
+
+on:
+  push:
+    branches: [codex/verify-1696-real]
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bison flex \
+            libreadline-dev libicu-dev uuid-dev
+
+      - name: build and install IvorySQL
+        run: |
+          ./configure --prefix="$PWD/inst" --with-icu \
+            --with-uuid=e2fs --enable-cassert
+          make -j2
+          make install
+
+      - name: reproduce NLS-dependent index ordering
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$PWD/inst/bin:$PATH"
+          export LD_LIBRARY_PATH="$PWD/inst/lib:${LD_LIBRARY_PATH:-}"
+          data_dir="$RUNNER_TEMP/ivorysql-1696-data"
+          initdb -D "$data_dir" -m oracle -C normal --auth=trust --no-sync
+          pg_ctl -D "$data_dir" -l "$RUNNER_TEMP/ivorysql-1696.log" \
+            -o "-p 55432" start
+          trap 'pg_ctl -D "$data_dir" stop -m immediate' EXIT
+          createdb -p 55432 repro1696
+
+          psql -X -p 55432 -d repro1696 -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT version();
+          SHOW ivorysql.compatible_mode;
+          SHOW nls_date_format;
+
+          -- Reproduce the catalog state before the proposed fix.
+          ALTER FUNCTION sys.to_char(sys.oradate) IMMUTABLE;
+          CREATE TABLE nls_index_repro(d sys.oradate);
+          INSERT INTO nls_index_repro VALUES
+              (to_date('2023-01-31', 'YYYY-MM-DD')),
+              (to_date('2024-12-01', 'YYYY-MM-DD'));
+          SET nls_date_format = 'YYYY-MM-DD';
+          CREATE INDEX nls_index_repro_idx
+              ON nls_index_repro (sys.to_char(d));
+          ANALYZE nls_index_repro;
+
+          SET nls_date_format = 'DD/MM/YYYY';
+          SET enable_seqscan = off;
+          EXPLAIN (COSTS OFF)
+              SELECT sys.to_char(d) AS formatted
+              FROM nls_index_repro
+              ORDER BY sys.to_char(d);
+          SELECT sys.to_char(d) AS formatted
+          FROM nls_index_repro
+          ORDER BY sys.to_char(d);
+
+          SET enable_seqscan = on;
+          SET enable_indexscan = off;
+          SET enable_bitmapscan = off;
+          EXPLAIN (COSTS OFF)
+              SELECT sys.to_char(d) AS formatted
+              FROM nls_index_repro
+              ORDER BY sys.to_char(d);
+          SELECT sys.to_char(d) AS formatted
+          FROM nls_index_repro
+          ORDER BY sys.to_char(d);
+
+          DROP INDEX nls_index_repro_idx;
+          ALTER FUNCTION sys.to_char(sys.oradate) STABLE;
+          SELECT oid::regprocedure, provolatile
+          FROM pg_proc
+          WHERE oid = 'sys.to_char(sys.oradate)'::regprocedure;
+          SQL
+
+          set +e
+          rejection_output="$(psql -X -p 55432 -d repro1696 \
+            -v ON_ERROR_STOP=1 -c \
+            'CREATE INDEX nls_index_repro_idx ON nls_index_repro (sys.to_char(d));' 2>&1)"
+          rejection_status=$?
+          set -e
+          printf '%s\n' "$rejection_output"
+          test "$rejection_status" -ne 0
+          grep -F 'functions in index expression must be marked IMMUTABLE' \
+            <<<"$rejection_output"
