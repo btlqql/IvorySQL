@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: codex/dog-autonomous-auth
           fetch-depth: 0
 
       - name: Restore the unpatched implementation
