@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          make -C src/pl/plisql/src oracle-pg-check \
+          make -C src/pl/plisql/src oracle-check \
             REGRESS=plisql_autonomous 2>&1 | tee autonomous-${{ matrix.variant }}.log
           status=${PIPESTATUS[0]}
           set -e
