@@ -500,7 +500,7 @@ generate_query_for_graph_path(RangeTblEntry *rte, List *graph_path)
 		 * rule 4) does not specify whose access privileges to use when
 		 * accessing the element tables: property graph owner's or current
 		 * user's. It is safer to use current user's privileges so as not to
-		 * make property graphs as a hole for unpriviledged data access. This
+		 * make property graphs as a hole for unprivileged data access. This
 		 * is inline with the views being security_invoker by default.
 		 */
 		rel = table_open(pe->reloid, AccessShareLock);
