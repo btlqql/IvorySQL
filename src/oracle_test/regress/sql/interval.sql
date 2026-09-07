@@ -800,3 +800,9 @@ SELECT INTERVAL 'infinity ago';
 SELECT INTERVAL '+infinity -infinity';
 SELECT PGEXTRACT(epoch from interval '1000000000 days');
 reset ivorysql.enable_emptystring_to_null;
+
+-- Bare INTERVAL type name is accepted in oracle parser mode.
+SET ivorysql.compatible_mode = oracle;
+CREATE TABLE interval_bare_oracle (a interval);
+DROP TABLE interval_bare_oracle;
+SET ivorysql.compatible_mode = pg;

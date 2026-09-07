@@ -1690,3 +1690,13 @@ reset ivorysql.enable_emptystring_to_null;
 ERROR:  syntax error at or near ")"
 LINE 20:      (VALUES (interval '-infinity'),
                                            ^
+
+-- Bare INTERVAL type name is accepted in oracle parser mode.
+SET ivorysql.compatible_mode = oracle;
+SET
+CREATE TABLE interval_bare_oracle (a interval);
+CREATE TABLE
+DROP TABLE interval_bare_oracle;
+DROP TABLE
+SET ivorysql.compatible_mode = pg;
+SET
