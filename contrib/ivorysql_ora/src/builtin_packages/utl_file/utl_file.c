@@ -682,7 +682,7 @@ ora_utl_file_fseek(PG_FUNCTION_ARGS)
 	bool		relative_specified;
 	long		current_offset;
 	int64		target_offset;
-	struct stat statbuf;
+	long		file_size;
 
 	CHECK_FILE_HANDLE();
 	fd = get_file_handle_from_slot(PG_GETARG_UINT32(0), NULL, NULL);
@@ -696,7 +696,21 @@ ora_utl_file_fseek(PG_FUNCTION_ARGS)
 						 "Absolute and relative offsets cannot both be NULL.");
 
 	current_offset = ftell(fd);
-	if (current_offset < 0 || fstat(fileno(fd), &statbuf) != 0)
+	if (current_offset < 0)
+		IO_EXCEPTION();
+
+	/*
+	 * fstat() reports only the size already on disk; buffered writes are
+	 * not included.  Flush the stream and measure the logical end of the
+	 * file, then restore the original position before validating the seek.
+	 */
+	do_flush(fd);
+	if (fseek(fd, 0, SEEK_END) != 0)
+		IO_EXCEPTION();
+	file_size = ftell(fd);
+	if (file_size < 0)
+		IO_EXCEPTION();
+	if (fseek(fd, current_offset, SEEK_SET) != 0)
 		IO_EXCEPTION();
 
 	if (absolute_specified)
@@ -708,7 +722,7 @@ ora_utl_file_fseek(PG_FUNCTION_ARGS)
 		target_offset = (int64) current_offset + PG_GETARG_INT32(2);
 	}
 
-	if (target_offset < 0 || target_offset > statbuf.st_size ||
+	if (target_offset < 0 || target_offset > file_size ||
 		target_offset > LONG_MAX)
 		CUSTOM_EXCEPTION(INVALID_OFFSET, "Provided offset is outside the file.");
 

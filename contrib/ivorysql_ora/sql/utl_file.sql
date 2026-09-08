@@ -218,6 +218,8 @@ declare
 begin
     f := utl_file.fopen('data_directory', 'regressseek.txt', 'w');
     utl_file.put_line(f, 'abc');   -- 4 bytes, still in the stdio buffer
+    utl_file.fseek(f, NULL, -2);
+    raise notice 'buffered relative seek position: %', utl_file.fgetpos(f);
     utl_file.fseek(f, 2, NULL);
     raise notice 'buffered write seek position: %', utl_file.fgetpos(f);
     utl_file.fclose(f);
