@@ -56,10 +56,8 @@ yminterval_cmp_value(const Interval *interval)
 static int
 yminterval_cmp_internal(Interval *interval1, Interval *interval2)
 {
-	TimeOffset	span1 = yminterval_cmp_value(interval1);
-	TimeOffset	span2 = yminterval_cmp_value(interval2);
-
-	return ((span1 < span2) ? -1 : (span1 > span2) ? 1 : 0);
+	return ((interval1->month < interval2->month) ? -1 :
+			(interval1->month > interval2->month) ? 1 : 0);
 }
 
 /*****************************************************************************

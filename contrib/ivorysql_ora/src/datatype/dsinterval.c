@@ -1429,13 +1429,33 @@ dsinterval_cmp_value(const Interval *interval)
 	return span;
 }
 
+#ifdef HAVE_INT64_TIMESTAMP
+static inline INT128
+dsinterval_cmp_value128(const Interval *interval)
+{
+	INT128		span;
+
+	span = int64_to_int128(interval->time);
+	int128_add_int64_mul_int64(&span, interval->day, USECS_PER_DAY);
+
+	return span;
+}
+#endif
+
 static int
 dsinterval_cmp_internal(Interval *interval1, Interval *interval2)
 {
+#ifdef HAVE_INT64_TIMESTAMP
+	INT128		span1 = dsinterval_cmp_value128(interval1);
+	INT128		span2 = dsinterval_cmp_value128(interval2);
+
+	return int128_compare(span1, span2);
+#else
 	TimeOffset	span1 = dsinterval_cmp_value(interval1);
 	TimeOffset	span2 = dsinterval_cmp_value(interval2);
 
 	return ((span1 < span2) ? -1 : (span1 > span2) ? 1 : 0);
+#endif
 }
 
 /*****************************************************************************
