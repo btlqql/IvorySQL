@@ -2927,6 +2927,14 @@ CREATE INDEX TEST_LENGTHC_IDX_D ON TEST_LENGTHC_IDX (lengthc(d));
 ERROR:  functions in index expression must be marked IMMUTABLE
 LINE 1: ...ATE INDEX TEST_LENGTHC_IDX_D ON TEST_LENGTHC_IDX (lengthc(d)...
                                                              ^
+CREATE INDEX TEST_LENGTHC_IDX_D_LEN ON TEST_LENGTHC_IDX (length(d));
+ERROR:  functions in index expression must be marked IMMUTABLE
+LINE 1: ...INDEX TEST_LENGTHC_IDX_D_LEN ON TEST_LENGTHC_IDX (length(d)...
+                                                             ^
+CREATE INDEX TEST_LENGTHC_IDX_D_LENB ON TEST_LENGTHC_IDX (lengthb(d));
+ERROR:  functions in index expression must be marked IMMUTABLE
+LINE 1: ...NDEX TEST_LENGTHC_IDX_D_LENB ON TEST_LENGTHC_IDX (lengthb(d...
+                                                             ^
 SELECT count(*) = 6 AS datetime_lengths_are_stable
 FROM pg_catalog.pg_proc
 WHERE oid = ANY (ARRAY['sys.length(sys.oradate)'::regprocedure,

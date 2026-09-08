@@ -1280,6 +1280,8 @@ select lengthc(cast('abc'::bytea as blob)) from dual;
 CREATE TABLE TEST_LENGTHC_IDX(c varchar2(50), d date);
 CREATE INDEX TEST_LENGTHC_IDX_I ON TEST_LENGTHC_IDX (lengthc(c));
 CREATE INDEX TEST_LENGTHC_IDX_D ON TEST_LENGTHC_IDX (lengthc(d));
+CREATE INDEX TEST_LENGTHC_IDX_D_LEN ON TEST_LENGTHC_IDX (length(d));
+CREATE INDEX TEST_LENGTHC_IDX_D_LENB ON TEST_LENGTHC_IDX (lengthb(d));
 SELECT count(*) = 6 AS datetime_lengths_are_stable
 FROM pg_catalog.pg_proc
 WHERE oid = ANY (ARRAY['sys.length(sys.oradate)'::regprocedure,
