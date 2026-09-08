@@ -269,6 +269,13 @@ test_gb18030_json_multibyte(pe_test_config *tc)
 		0xb9, 0xfa,				/* U+56FD */
 		0x22, 0x7d				/* "} */
 	};
+	static const unsigned char decoded_value[] = {
+		0xa5, 0xab, 0xa5, 0xca, 0xa5, 0xc0, 0xa1, 0xa2, /* U+30AB etc. */
+		0xa5, 0xa2, 0xa5, 0xe1, 0xa5, 0xea, 0xa5, 0xab, /* U+30A2 etc. */
+		0xba, 0xcf,				/* U+5408 */
+		0xd0, 0x5c,				/* U+8846; second byte is '\' */
+		0xb9, 0xfa				/* U+56FD */
+	};
 	static const unsigned char truncated_input[] = {
 		0x7b, 0x22, 0x6a, 0x61, 0x22, 0x3a, 0x22,	/* {"ja":" */
 		0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,	/* ABCDEFG */
@@ -292,11 +299,21 @@ test_gb18030_json_multibyte(pe_test_config *tc)
 	lex = makeJsonLexContextCstringLen(NULL, raw_buf->data, input_len,
 									   PG_GB18030, true);
 	json_error = pg_parse_json(lex, &sem);
-	report_result(tc, json_error == JSON_SUCCESS,
-				  "GB18030 multibyte backslash - pg_parse_json",
-				  "", "need_escapes=true",
-				  json_error == JSON_SUCCESS ?
-				  "accepted" : json_errdetail(json_error, lex));
+	if (json_error == JSON_SUCCESS)
+	{
+		ok = ((size_t) lex->strval->len == sizeof(decoded_value) &&
+			  memcmp(lex->strval->data, decoded_value, sizeof(decoded_value)) == 0);
+		report_result(tc, ok,
+					  "GB18030 multibyte backslash - pg_parse_json",
+					  "", "need_escapes=true",
+					  ok ? "accepted and decoded correctly" :
+					  "decoded content mismatch");
+	}
+	else
+		report_result(tc, false,
+					  "GB18030 multibyte backslash - pg_parse_json",
+					  "", "need_escapes=true",
+					  json_errdetail(json_error, lex));
 	freeJsonLexContext(lex);
 
 	/* need_escapes=false exercises the validation-only path */
