@@ -212,6 +212,18 @@ begin
 end;
 /
 
+-- FSEEK on a write handle must see data that is still buffered
+declare
+    f sys.ora_utl_file_file_type;
+begin
+    f := utl_file.fopen('data_directory', 'regressseek.txt', 'w');
+    utl_file.put_line(f, 'abc');   -- 4 bytes, still in the stdio buffer
+    utl_file.fseek(f, 2, NULL);
+    raise notice 'buffered write seek position: %', utl_file.fgetpos(f);
+    utl_file.fclose(f);
+end;
+/
+
 -- test cases for automatic file closing on session terminated/rollback etc
 declare
     f sys.ora_utl_file_file_type;
