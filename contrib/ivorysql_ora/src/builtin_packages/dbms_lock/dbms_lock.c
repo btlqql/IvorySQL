@@ -344,12 +344,16 @@ PG_FUNCTION_INFO_V1(ivorysql_dbms_lock_sleep);
 Datum
 ivorysql_dbms_lock_sleep(PG_FUNCTION_ARGS)
 {
-    long total_usec;
-    long remaining;
+    int64 total_usec;
+    int64 remaining;
     float8 seconds = PG_GETARG_FLOAT8(0);
 
     if (dbms_lock_hash_table == NULL)
 	    dbms_lock_init_hash_table();
+
+    if (isnan(seconds))
+        ereport(ERROR,
+                (errmsg("DBMS_LOCK.SLEEP: seconds must not be NaN")));
 
     if (seconds < 0)
         ereport(ERROR,
@@ -361,7 +365,8 @@ ivorysql_dbms_lock_sleep(PG_FUNCTION_ARGS)
 
 
 
-    total_usec = (long)(seconds * 1000000);
+    /* Windows has 32-bit long even in 64-bit builds. */
+    total_usec = (int64)(seconds * 1000000);
     remaining = total_usec;
     while (remaining > 0)
     {
