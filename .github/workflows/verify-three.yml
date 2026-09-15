@@ -1,0 +1,40 @@
+name: Verify three IvorySQL fixes
+on:
+  push:
+    branches: [codex/verify-ivory-three-expected-0916]
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential bison flex uuid-dev libxml2-dev libxslt1-dev libicu-dev libreadline-dev libipc-run-perl
+      - name: Build and install
+        run: |
+          ./configure --prefix="$RUNNER_TEMP/install" --enable-cassert --enable-debug --with-uuid=e2fs --with-libxml --with-libxslt --with-icu --enable-tap-tests >configure.log 2>&1
+          make -j4 world-bin >build.log 2>&1
+          make install-world-bin >install.log 2>&1
+      - name: Targeted Oracle regressions
+        run: make -C contrib/ivorysql_ora oracle-check ORA_REGRESS='dbms_lock ora_xml_functions ora_dbms_output' >targeted.log 2>&1
+      - name: Installed PostgreSQL regressions
+        run: |
+          export PATH="$RUNNER_TEMP/install/bin:$PATH"
+          initdb -D "$RUNNER_TEMP/pgdata" -m pg --no-locale -E UTF8 >initdb.log 2>&1
+          pg_ctl -D "$RUNNER_TEMP/pgdata" -l "$RUNNER_TEMP/server.log" -o '-p 55432' start
+          PGPORT=55432 make installcheck-world >installcheck-world.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ivory-verification
+          path: |
+            *.log
+            contrib/ivorysql_ora/results/
+            contrib/ivorysql_ora/regression.diffs
+            contrib/ivorysql_ora/tmp_check/log/
+            **/regression.diffs
+            **/regression.out
