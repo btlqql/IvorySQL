@@ -98,6 +98,7 @@ static DbmsOutputBuffer *output_buffer = NULL;
 /* Internal function declarations */
 static void init_output_buffer(int64 buffer_size);
 static void cleanup_output_buffer(void);
+static void check_buffer_limit(int line_len);
 static void add_line_to_buffer(const char *line, int line_len);
 static DbmsOutputLine *pop_line_from_buffer(void);
 
@@ -192,12 +193,8 @@ cleanup_output_buffer(void)
  * - Raises ORU-10027 if limit exceeded
  */
 static void
-add_line_to_buffer(const char *line, int line_len)
+check_buffer_limit(int line_len)
 {
-	MemoryContext oldcontext;
-	DbmsOutputLine *node;
-	Size		node_size;
-
 	/*
 	 * Check user-perceived buffer limit BEFORE adding (Oracle behavior).
 	 * Only content bytes count toward limit, not node overhead.
@@ -212,6 +209,16 @@ add_line_to_buffer(const char *line, int line_len)
 					 errmsg("ORU-10027: buffer overflow, limit of %lld bytes",
 							(long long) output_buffer->buffer_size)));
 	}
+}
+
+static void
+add_line_to_buffer(const char *line, int line_len)
+{
+	MemoryContext oldcontext;
+	DbmsOutputLine *node;
+	Size		node_size;
+
+	check_buffer_limit(line_len);
 
 	/* Allocate node with embedded data in buffer memory context */
 	oldcontext = MemoryContextSwitchTo(output_buffer->buffer_mcxt);
@@ -377,6 +384,7 @@ ora_dbms_output_put_line(PG_FUNCTION_ARGS)
 							DBMS_OUTPUT_MAX_LINE_LENGTH)));
 
 		/* Append non-NULL text to current line */
+		check_buffer_limit(output_buffer->current_line->len + line_len);
 		if (!is_null)
 			appendStringInfoString(output_buffer->current_line, line_str);
 		add_line_to_buffer(output_buffer->current_line->data,
