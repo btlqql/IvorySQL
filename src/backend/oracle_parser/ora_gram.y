@@ -213,6 +213,9 @@ static void preprocess_pubobj_list(List *pubobjspec_list,
 								   ora_core_yyscan_t yyscanner);
 static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 static void determineLanguage(List *options);
+static AlterTableCmd *makeModifyColumnTypeOrVisibilityCmd(char *colname,
+												  TypeName *typeName,
+												  int location);
 
 %}
 
@@ -266,6 +269,7 @@ static void determineLanguage(List *options);
 	PartitionElem *partelem;
 	PartitionSpec *partspec;
 	PartitionBoundSpec *partboundspec;
+	SinglePartitionSpec *singlepartspec;
 	RoleSpec   *rolespec;
 	PublicationObjSpec *publicationobjectspec;
 	PublicationAllObjSpec *publicationallobjectspec;
@@ -668,6 +672,8 @@ static void determineLanguage(List *options);
 %type <partelem>	part_elem
 %type <list>		part_params
 %type <partboundspec> PartitionBoundSpec
+%type <singlepartspec> SinglePartitionSpec
+%type <list>		partitions_list
 %type <list>		hash_partbound
 %type <defelt>		hash_partbound_elem
 
@@ -678,7 +684,8 @@ static void determineLanguage(List *options);
 %type <node> param_mode
 %type <boolean>	opt_do_from_where
 
-%type <list>	identity_clause identity_options drop_identity
+%type <list>	modify_clause modify_column_list modify_column_item
+%type <ival>	modify_column_null
 %type <boolean>	opt_with opt_by
 
 %type <node>	json_format_clause
@@ -828,7 +835,7 @@ static void determineLanguage(List *options);
 	ORDER ORDINALITY OTHERS OUT_P OUTER_P
 	OVER OVERLAPS OVERLAY OVERRIDING OWNED OWNER PACKAGES
 
-	PARALLEL PARAMETER PARSER PARTIAL PARTITION PASSING PASSWORD PATH
+	PARALLEL PARAMETER PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PATH
 	EXTRACT PGEXTRACT PLACING PLAN PLANS POLICY PORTION
 	POSITION PRECEDING PRECISION PRESERVE PREPARE PREPARED PRIMARY
 	PRIOR PRIVILEGES PROCEDURAL PROCEDURE PROCEDURES PROGRAM PROPERTIES PROPERTY PUBLICATION
@@ -843,7 +850,7 @@ static void determineLanguage(List *options);
 	SAVEPOINT SCALAR SCALE SCHEMA SCHEMAS SCROLL SEARCH SECOND_P SECURITY SELECT
 	SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARD SHARE SHOW
-	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOME SOURCE SPECIFICATION SQL_P STABLE STANDALONE_P
+	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOME SOURCE SPECIFICATION SPLIT SQL_P STABLE STANDALONE_P
 	START STATEMENT STATISTICS STDIN STDOUT STORAGE STORED STRICT_P STRING_P STRIP_P
 	SUBSCRIPTION SUBSTRING SUPPORT SYMMETRIC SYSDATE SYSID SYSTEM_P SYSTEM_USER SYSTIMESTAMP
 
@@ -2619,7 +2626,9 @@ AlterTableStmt:
 alter_table_cmds:
 			alter_table_cmd							{ $$ = list_make1($1); }
 			| alter_table_cmds ',' alter_table_cmd	{ $$ = lappend($1, $3); }
-			| MODIFY identity_clause				{ $$ = $2; }
+			| MODIFY modify_clause				{ $$ = $2; }
+			| alter_table_cmds ',' MODIFY modify_clause
+											{ $$ = list_concat($1, $4); }
 		;
 
 ora_alter_view_cmds:
@@ -2635,6 +2644,23 @@ ora_alter_view_cmd:
 				n->name = NULL;
 				$$ = (Node *)n;
 			}
+		;
+
+partitions_list:
+			SinglePartitionSpec							{ $$ = list_make1($1); }
+			| partitions_list ',' SinglePartitionSpec	{ $$ = lappend($1, $3); }
+		;
+
+SinglePartitionSpec:
+			PARTITION qualified_name PartitionBoundSpec
+				{
+					SinglePartitionSpec *n = makeNode(SinglePartitionSpec);
+
+					n->name = $2;
+					n->bound = $3;
+
+					$$ = n;
+				}
 		;
 
 partition_cmd:
@@ -2674,6 +2700,34 @@ partition_cmd:
 					n->subtype = AT_DetachPartitionFinalize;
 					cmd->name = $3;
 					cmd->bound = NULL;
+					cmd->concurrent = false;
+					n->def = (Node *) cmd;
+					$$ = (Node *) n;
+				}
+			/* ALTER TABLE <name> MERGE PARTITIONS () INTO <partition_name> */
+			| MERGE PARTITIONS '(' qualified_name_list ')' INTO qualified_name
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					PartitionCmd *cmd = makeNode(PartitionCmd);
+
+					n->subtype = AT_MergePartitions;
+					cmd->name = $7;
+					cmd->bound = NULL;
+					cmd->partlist = $4;
+					cmd->concurrent = false;
+					n->def = (Node *) cmd;
+					$$ = (Node *) n;
+				}
+			/* ALTER TABLE <name> SPLIT PARTITION <partition_name> INTO () */
+			| SPLIT PARTITION qualified_name INTO '(' partitions_list ')'
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					PartitionCmd *cmd = makeNode(PartitionCmd);
+
+					n->subtype = AT_SplitPartition;
+					cmd->name = $3;
+					cmd->bound = NULL;
+					cmd->partlist = $6;
 					cmd->concurrent = false;
 					n->def = (Node *) cmd;
 					$$ = (Node *) n;
@@ -2873,20 +2927,6 @@ alter_table_cmd:
 					AlterTableCmd *n = makeNode(AlterTableCmd);
 					n->subtype = AT_SetInvisible;
 					n->name = $3;
-					$$ = (Node *)n;
-				}
-			| MODIFY ColId INVISIBLE
-				{
-					AlterTableCmd *n = makeNode(AlterTableCmd);
-					n->subtype = AT_SetInvisible;
-					n->name = $2;
-					$$ = (Node *)n;
-				}
-			| MODIFY ColId VISIBLE
-				{
-					AlterTableCmd *n = makeNode(AlterTableCmd);
-					n->subtype = AT_DropInvisible;
-					n->name = $2;
 					$$ = (Node *)n;
 				}
 			/* ALTER TABLE <name> ALTER [COLUMN] <colname> DROP NOT NULL */
@@ -3620,19 +3660,69 @@ set_statistics_value:
 			| DEFAULT						{ $$ = NULL; }
 		;
 
-identity_clause:
-		'(' identity_options ')'		{ $$ = $2; }
-		| identity_options				{ $$ = $1; }
-		| '(' drop_identity ')' 		{ $$ = $2; }
-		| drop_identity 				{ $$ = $1; }
-	;
+/*
+ * Oracle-compatible ALTER TABLE ... MODIFY.
+ *
+ * Each item yields a List of AlterTableCmd, because a single Oracle MODIFY item
+ * can expand into more than one internal subcommand (for example a type change
+ * plus a NOT NULL constraint).
+ *
+ * VISIBLE and INVISIBLE are unreserved keywords and can therefore be parsed
+ * as type names.  makeModifyColumnTypeOrVisibilityCmd() resolves that case
+ * after parsing, preserving the existing visibility syntax while allowing a
+ * bare type change.
+ */
+modify_clause:
+			'(' modify_column_list ')'		{ $$ = $2; }
+			| modify_column_item			{ $$ = $1; }
+		;
 
-identity_options:
-			ColId Typename GENERATED generated_when AS IDENTITY_P OptParenthesizedSeqOptList
+modify_column_list:
+			modify_column_item								{ $$ = $1; }
+			| modify_column_list ',' modify_column_item		{ $$ = list_concat($1, $3); }
+		;
+
+modify_column_item:
+			/* MODIFY <colname> <typename> */
+			ColId Typename
+				{
+					$$ = list_make1(makeModifyColumnTypeOrVisibilityCmd($1, $2, @1));
+				}
+			/* MODIFY <colname> <typename> {NOT NULL | NULL} */
+			| ColId Typename modify_column_null
 				{
 					AlterTableCmd *m = makeNode(AlterTableCmd);
 					AlterTableCmd *n = makeNode(AlterTableCmd);
-					ColumnDef *def = makeNode(ColumnDef);
+					ColumnDef  *def = makeNode(ColumnDef);
+
+					m->subtype = AT_AlterColumnType;
+					m->name = $1;
+					m->def = (Node *) def;
+					/* We only use these fields of the ColumnDef node */
+					def->typeName = $2;
+					def->location = @1;
+
+					n->subtype = $3 ? AT_SetNotNull : AT_DropNotNull;
+					n->name = $1;
+
+					$$ = list_make2(m, n);
+				}
+			/* MODIFY <colname> {NOT NULL | NULL} */
+			| ColId modify_column_null
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+
+					n->subtype = $2 ? AT_SetNotNull : AT_DropNotNull;
+					n->name = $1;
+					$$ = list_make1(n);
+				}
+			/* MODIFY <colname> [<typename>] GENERATED ... AS IDENTITY [(...)] */
+			| ColId Typename GENERATED generated_when AS IDENTITY_P OptParenthesizedSeqOptList
+				{
+					AlterTableCmd *m = makeNode(AlterTableCmd);
+					AlterTableCmd *n = makeNode(AlterTableCmd);
+					ColumnDef  *def = makeNode(ColumnDef);
+
 					m->subtype = AT_AlterColumnType;
 					m->name = $1;
 					m->def = (Node *) def;
@@ -3642,37 +3732,42 @@ identity_options:
 						$4 = ATTRIBUTE_ORA_IDENTITY_ALWAYS;
 					else if ($4 == ATTRIBUTE_IDENTITY_BY_DEFAULT)
 						$4 = ATTRIBUTE_ORA_IDENTITY_BY_DEFAULT;
-					n->def = (Node *)lcons(makeDefElem("generated", (Node *) makeInteger($4), @1), $7);
-
+					n->def = (Node *) lcons(makeDefElem("generated", (Node *) makeInteger($4), @1), $7);
 					n->subtype = AT_SetIdentity;
 					n->name = $1;
+
 					$$ = list_make2(m, n);
 				}
 			| ColId GENERATED generated_when AS IDENTITY_P OptParenthesizedSeqOptList
 				{
 					AlterTableCmd *n = makeNode(AlterTableCmd);
+
 					if ($3 == ATTRIBUTE_IDENTITY_ALWAYS)
 						$3 = ATTRIBUTE_ORA_IDENTITY_ALWAYS;
 					else if ($3 == ATTRIBUTE_IDENTITY_BY_DEFAULT)
 						$3 = ATTRIBUTE_ORA_IDENTITY_BY_DEFAULT;
-					n->def = (Node *)lcons(makeDefElem("generated", (Node *) makeInteger($3), @1), $6);
+					n->def = (Node *) lcons(makeDefElem("generated", (Node *) makeInteger($3), @1), $6);
+					n->subtype = AT_SetIdentity;
+					n->name = $1;
 
-				n->subtype = AT_SetIdentity;
-				n->name = $1;
+					$$ = list_make1(n);
+				}
+			/* MODIFY <colname> DROP IDENTITY */
+			| ColId DROP IDENTITY_P
+				{
+					AlterTableCmd *n = makeNode(AlterTableCmd);
 
-				$$ = list_make1(n);
-			}
+					n->subtype = AT_DropIdentity;
+					n->name = $1;
+					n->missing_ok = false;
+					$$ = list_make1(n);
+				}
+		;
 
-drop_identity:
-		ColId DROP IDENTITY_P
-			{
-				AlterTableCmd *n = makeNode(AlterTableCmd);
-				n->subtype = AT_DropIdentity;
-				n->name = $1;
-				n->missing_ok = false;
-				$$ = list_make1(n);
-			}
-	;
+modify_column_null:
+			NOT NULL_P						{ $$ = true; }
+			| NULL_P						{ $$ = false; }
+		;
 
 set_access_method_name:
 			ColId							{ $$ = $1; }
@@ -21768,6 +21863,7 @@ unreserved_keyword:
 			| PARSER
 			| PARTIAL
 			| PARTITION
+			| PARTITIONS
 			| PASSING
 			| PASSWORD
 			| PATH
@@ -21857,6 +21953,7 @@ unreserved_keyword:
 			| SNAPSHOT
 			| SOURCE
 			| SPECIFICATION
+			| SPLIT
 			| SQL_P
 			| SQL_MACRO
 			| STABLE
@@ -22499,6 +22596,7 @@ bare_label_keyword:
 			| PARSER
 			| PARTIAL
 			| PARTITION
+			| PARTITIONS
 			| PASSING
 			| PASSWORD
 			| PATH
@@ -22600,6 +22698,7 @@ bare_label_keyword:
 			| SOME
 			| SOURCE
 			| SPECIFICATION
+			| SPLIT
 			| SQL_P
 			| SQL_MACRO
 			| STABLE
@@ -22793,6 +22892,49 @@ makeColumnRef(char *colname, List *indirection,
 	/* No subscripting, so all indirection gets added to field list */
 	c->fields = lcons(makeString(colname), indirection);
 	return (Node *) c;
+}
+
+/*
+ * Build the command for the type-or-visibility form of Oracle MODIFY.
+ *
+ * VISIBLE and INVISIBLE are unreserved keywords, so the grammar accepts them
+ * as unqualified type names.  Treat those two exact, unadorned names as the
+ * pre-existing visibility syntax.  A qualified, modified, or array type with
+ * the same final name remains a regular type name.
+ */
+static AlterTableCmd *
+makeModifyColumnTypeOrVisibilityCmd(char *colname, TypeName *typeName,
+									int location)
+{
+	AlterTableCmd *cmd = makeNode(AlterTableCmd);
+	ColumnDef  *def;
+
+	cmd->name = colname;
+	if (!typeName->setof && !typeName->pct_type && !typeName->row_type &&
+		list_length(typeName->names) == 1 && typeName->typmods == NIL &&
+		typeName->arrayBounds == NIL)
+	{
+		const char *typeNameStr = strVal(linitial(typeName->names));
+
+		if (strcmp(typeNameStr, "invisible") == 0)
+		{
+			cmd->subtype = AT_SetInvisible;
+			return cmd;
+		}
+		if (strcmp(typeNameStr, "visible") == 0)
+		{
+			cmd->subtype = AT_DropInvisible;
+			return cmd;
+		}
+	}
+
+	def = makeNode(ColumnDef);
+	def->typeName = typeName;
+	def->location = location;
+	cmd->subtype = AT_AlterColumnType;
+	cmd->def = (Node *) def;
+
+	return cmd;
 }
 
 static Node *
