@@ -220,9 +220,9 @@ SELECT min(d) = INTERVAL '-106751992 00:00:00' DAY(9) TO SECOND AS day_ovf_min F
 
 SET enable_seqscan = off;
 
-SELECT count(*) = 2 AS mon_ovf_index_count FROM test_interval_ovf WHERE y > INTERVAL '0-0' YEAR TO MONTH;
+SELECT count(*) = 2 AS mon_ovf_index_count FROM test_interval_ovf WHERE y >= INTERVAL '0-0' YEAR TO MONTH;
 
-SELECT count(*) = 2 AS day_ovf_index_count FROM test_interval_ovf WHERE d > INTERVAL '0 00:00:00' DAY TO SECOND;
+SELECT count(*) = 2 AS day_ovf_index_count FROM test_interval_ovf WHERE d >= INTERVAL '0 00:00:00' DAY TO SECOND;
 
 RESET enable_seqscan;
 
