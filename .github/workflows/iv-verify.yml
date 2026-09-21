@@ -1,0 +1,49 @@
+name: IV verify
+
+# Private verification scaffolding for the fork.  This file lives only on the
+# iv-red/* and iv-fix/* branches and is never part of a pull request.
+
+on:
+  push:
+    branches: ['iv-red/**', 'iv-fix/**']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential bison flex uuid-dev libxml2-dev libxslt1-dev \
+            libicu-dev libreadline-dev libipc-run-perl
+
+      - name: Configure, build, install
+        timeout-minutes: 60
+        run: |
+          ./configure --prefix="$RUNNER_TEMP/install" --enable-cassert --enable-debug \
+            --with-uuid=e2fs --with-libxml --with-libxslt --with-icu --enable-tap-tests >configure.log 2>&1
+          make -j4 world-bin >build.log 2>&1
+          make install-world-bin >install.log 2>&1
+
+      - name: Full Oracle regression suite (audit)
+        run: |
+          set -o pipefail
+          make -C contrib/ivorysql_ora oracle-check 2>&1 | tee target.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iv-verify
+          path: |
+            *.log
+            contrib/ivorysql_ora/results/
+            contrib/ivorysql_ora/regression.diffs
+            contrib/ivorysql_ora/regression.out
+            contrib/ivorysql_ora/tmp_check/log/
+          if-no-files-found: ignore
