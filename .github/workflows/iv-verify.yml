@@ -1,0 +1,73 @@
+name: IV verify
+
+# Private verification scaffolding for the fork.  This file lives only on the
+# iv-red/* and iv-fix/* branches and is never part of a pull request.
+
+on:
+  push:
+    branches: ['iv-red/**', 'iv-fix/**']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential bison flex uuid-dev libxml2-dev libxslt1-dev \
+            libicu-dev libreadline-dev libipc-run-perl
+
+      - name: Configure, build, install
+        timeout-minutes: 60
+        run: |
+          ./configure --prefix="$RUNNER_TEMP/install" --enable-cassert --enable-debug \
+            --with-uuid=e2fs --with-libxml --with-libxslt --with-icu --enable-tap-tests >configure.log 2>&1
+          make -j4 world-bin >build.log 2>&1
+          make install-world-bin >install.log 2>&1
+
+      - name: Targeted Oracle regression
+        run: |
+          set -o pipefail
+          slug="${GITHUB_REF_NAME#iv-*/}"
+          case "$slug" in
+            interval-ovf)     tests="ora_interval" ;;
+            fcopy-self)       tests="utl_file" ;;
+            fcopy-binary)     tests="utl_file" ;;
+            getline-size)     tests="utl_file" ;;
+            interval-arith)   tests="ora_interval ora_interval_arith" ;;
+            *)                tests="ora_interval" ;;
+          esac
+          echo "slug=$slug tests=$tests"
+          make -C contrib/ivorysql_ora oracle-check ORA_REGRESS="$tests" 2>&1 | tee target.log
+
+      - name: Extra SQL behaviour check
+        run: |
+          set -o pipefail
+          slug="${GITHUB_REF_NAME#iv-*/}"
+          if [ ! -f "iv-check-$slug.sql" ]; then
+            echo "no iv-check-$slug.sql on this branch, skipping"
+            exit 0
+          fi
+          export PATH="$RUNNER_TEMP/install/bin:$PATH"
+          initdb -D "$RUNNER_TEMP/pgdata" -m oracle --no-locale -E UTF8 >initdb.log 2>&1
+          pg_ctl -D "$RUNNER_TEMP/pgdata" -l "$RUNNER_TEMP/server.log" -o '-p 55432' start
+          PGPORT=55432 psql -X -a -f "iv-check-$slug.sql" 2>&1 | tee "iv-check-$slug.log"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iv-verify
+          path: |
+            *.log
+            iv-check-*.log
+            contrib/ivorysql_ora/results/
+            contrib/ivorysql_ora/regression.diffs
+            contrib/ivorysql_ora/regression.out
+            contrib/ivorysql_ora/tmp_check/log/
+          if-no-files-found: ignore
