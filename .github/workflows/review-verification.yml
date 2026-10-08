@@ -1,0 +1,45 @@
+name: PR 2311 regression verification
+on:
+  push:
+    branches: ['codex/verify-2311-20261008']
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 48d00fd629b61ad864f822ecac6ce6a9a7f792e8
+      - name: Record tested commit
+        run: git rev-parse HEAD
+      - name: Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential bison flex uuid-dev libxml2-dev libxslt1-dev libicu-dev libreadline-dev libipc-run-perl
+      - name: Build and install
+        run: |
+          ./configure --prefix="$RUNNER_TEMP/install" --enable-cassert --enable-debug --with-uuid=e2fs --with-libxml --with-libxslt --with-icu --enable-tap-tests >configure.log 2>&1
+          make -j4 world-bin >build.log 2>&1
+          make install-world-bin >install.log 2>&1
+      - name: DBMS_UTILITY regression
+        run: |
+          set -o pipefail
+          make -C contrib/ivorysql_ora oracle-check ORA_REGRESS="dbms_utility" 2>&1 | tee dbms-utility.log
+      - name: PL/iSQL regression
+        run: |
+          set -o pipefail
+          make -C src/pl/plisql/src oracle-check 2>&1 | tee plisql.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr2311-regression-evidence
+          path: |
+            *.log
+            contrib/ivorysql_ora/regression.*
+            contrib/ivorysql_ora/results/
+            contrib/ivorysql_ora/tmp_check/log/
+            src/pl/plisql/src/regression.*
+            src/pl/plisql/src/results/
+            src/pl/plisql/src/tmp_check/log/
