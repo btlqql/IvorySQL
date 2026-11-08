@@ -4689,6 +4689,7 @@ exec_stmt_execsql(PLiSQL_execstate * estate,
 	int			rc;
 	PLiSQL_expr *expr = stmt->sqlstmt;
 	int			too_many_rows_level = 0;
+	bool		strict = stmt->strict;
 
 	if (plisql_extra_errors & PLISQL_XCHECK_TOOMANYROWS)
 		too_many_rows_level = ERROR;
@@ -4729,6 +4730,15 @@ exec_stmt_execsql(PLiSQL_execstate * estate,
 			}
 		}
 		stmt->mod_stmt_set = true;
+	}
+
+	/* Oracle SELECT INTO requires exactly one row. */
+	if (stmt->into && !strict && !stmt->mod_stmt && compatible_db == ORA_PARSER)
+	{
+		List	   *plansources = SPI_plan_get_plan_sources(expr->plan);
+
+		if (list_length(plansources) == 1)
+			strict = ((CachedPlanSource *) linitial(plansources))->commandTag == CMDTAG_SELECT;
 	}
 
 	/*
@@ -4818,7 +4828,7 @@ exec_stmt_execsql(PLiSQL_execstate * estate,
 	 */
 	if (stmt->into)
 	{
-		if (stmt->strict || stmt->mod_stmt || too_many_rows_level)
+		if (strict || stmt->mod_stmt || too_many_rows_level)
 			tcount = 2;
 		else
 			tcount = 1;
@@ -4911,13 +4921,12 @@ exec_stmt_execsql(PLiSQL_execstate * estate,
 		target = (PLiSQL_variable *) plisql_get_datum(estate, estate->datums[stmt->target->dno]);
 
 		/*
-		 * If SELECT ... INTO specified STRICT, and the query didn't find
-		 * exactly one row, throw an error.  If STRICT was not specified, then
-		 * allow the query to find any number of rows.
+		 * Enforce exact cardinality for explicit STRICT and Oracle SELECT
+		 * INTO.  Other INTO statements still accept an empty result.
 		 */
 		if (n == 0)
 		{
-			if (stmt->strict)
+			if (strict)
 			{
 				char	   *errdetail;
 
@@ -4936,7 +4945,7 @@ exec_stmt_execsql(PLiSQL_execstate * estate,
 		}
 		else
 		{
-			if (n > 1 && (stmt->strict || stmt->mod_stmt || too_many_rows_level))
+			if (n > 1 && (strict || stmt->mod_stmt || too_many_rows_level))
 			{
 				char	   *errdetail;
 				int			errlevel;
@@ -4946,7 +4955,7 @@ exec_stmt_execsql(PLiSQL_execstate * estate,
 				else
 					errdetail = NULL;
 
-				errlevel = (stmt->strict || stmt->mod_stmt) ? ERROR : too_many_rows_level;
+				errlevel = (strict || stmt->mod_stmt) ? ERROR : too_many_rows_level;
 
 				ereport(errlevel,
 						(errcode(ERRCODE_TOO_MANY_ROWS),

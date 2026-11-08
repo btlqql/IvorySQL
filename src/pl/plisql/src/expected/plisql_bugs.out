@@ -126,3 +126,38 @@ SELECT test_bug1124_order() AS result FROM dual;
 (1 row)
 
 DROP FUNCTION test_bug1124_order;
+-- Oracle SELECT INTO requires exactly one row.
+CREATE TEMP TABLE select_into_rows (id int);
+INSERT INTO select_into_rows VALUES (1), (2);
+DECLARE
+    v int;
+BEGIN
+    SELECT 7 INTO v;
+    IF v IS DISTINCT FROM 7 THEN
+        RAISE EXCEPTION 'scalar SELECT INTO returned %', v;
+    END IF;
+    SELECT max(id) INTO v FROM select_into_rows WHERE id = 42;
+    IF v IS NOT NULL THEN
+        RAISE EXCEPTION 'aggregate SELECT INTO returned %', v;
+    END IF;
+    BEGIN
+        SELECT id INTO v FROM select_into_rows WHERE id = 42;
+        RAISE EXCEPTION 'empty SELECT INTO succeeded';
+    EXCEPTION WHEN NO_DATA_FOUND THEN
+        RAISE NOTICE 'caught no_data_found';
+    END;
+    BEGIN
+        SELECT id INTO v FROM select_into_rows ORDER BY id;
+        RAISE EXCEPTION 'multi-row SELECT INTO succeeded';
+    EXCEPTION WHEN TOO_MANY_ROWS THEN
+        RAISE NOTICE 'caught too_many_rows';
+    END;
+    UPDATE select_into_rows SET id = 43 WHERE id = 42 RETURNING id INTO v;
+    IF v IS NOT NULL THEN
+        RAISE EXCEPTION 'empty RETURNING INTO produced %', v;
+    END IF;
+END;
+/
+NOTICE:  caught no_data_found
+NOTICE:  caught too_many_rows
+DROP TABLE select_into_rows;
