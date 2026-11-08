@@ -105,9 +105,8 @@ utl_url_hexval(unsigned char c)
 /*
  * utl_url_charset_to_encoding - resolve a url_charset argument.
  *
- * Accepts both IANA names ("ISO-8859-1", "UTF-8") and PostgreSQL names
- * ("LATIN1", "UTF8"); pg_char_to_encoding() normalises case, dashes and
- * underscores for us.
+ * Accepts IANA and PostgreSQL names through pg_char_to_encoding().  Also
+ * accept common Oracle aliases with an equivalent PostgreSQL encoding.
  *
  * Oracle raises BAD_FIXED_WIDTH_CHARSET (ORA-29274) for fixed-width multibyte
  * character sets.  PostgreSQL has no such encoding in its catalog at all
@@ -120,6 +119,16 @@ utl_url_charset_to_encoding(text *charset)
 {
 	char	   *name = text_to_cstring(charset);
 	int			encoding = pg_char_to_encoding(name);
+
+	if (encoding < 0)
+	{
+		if (pg_strcasecmp(name, "AL32UTF8") == 0)
+			encoding = PG_UTF8;
+		else if (pg_strcasecmp(name, "WE8ISO8859P1") == 0)
+			encoding = PG_LATIN1;
+		else if (pg_strcasecmp(name, "WE8MSWIN1252") == 0)
+			encoding = PG_WIN1252;
+	}
 
 	if (encoding < 0)
 		ereport(ERROR,

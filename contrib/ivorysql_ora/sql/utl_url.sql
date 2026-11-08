@@ -234,3 +234,12 @@ BEGIN
     RAISE NOTICE 'should not get here: %', v_out;
 END;
 /
+
+-- Oracle character set aliases select the same wire encoding as their
+-- PostgreSQL equivalents in both directions.
+SELECT utl_url.escape('中文', FALSE, 'al32utf8') = '%E4%B8%AD%E6%96%87'
+       AND utl_url.unescape('%E4%B8%AD%E6%96%87', 'AL32UTF8') = '中文'
+       AND utl_url.escape('é', FALSE, 'WE8ISO8859P1') = '%E9'
+       AND utl_url.unescape('%E9', 'WE8ISO8859P1') = 'é'
+       AND utl_url.escape('€', FALSE, 'WE8MSWIN1252') = '%80'
+       AND utl_url.unescape('%80', 'WE8MSWIN1252') = '€' AS oracle_aliases;
